@@ -6,14 +6,22 @@
 
 ## Features
 
-- **Anonymous Login Testing**: Validates `anonymous:root` access on FTP servers.
-- **Root/Administrator Access Detection**: Tests access to sensitive directories (`/etc`, `/root`, `/Windows/System32`).
-- **Privilege Escalation Checks**: Identifies vulnerable FTP versions (e.g., Microsoft FTP Service 5.0) and tests executable uploads (`.asp`, `.sh`).
-- **FTP Bounce Attack Testing**: Probes `PORT` command vulnerabilities for indirect attacks.
-- **Recursive Directory Spidering**: Crawls directories (depth ≤ 3), flagging sensitive files/directories (e.g., `passwd`, `/Windows`).
-- **Vulnerability Scoring**: Scores targets (anonymous login: +1, sensitive items: +2, root access: +5, escalation: +4, FTP Bounce: +3; high-value ≥ 5).
-- **Logging**: Saves results to `darkftp_report.txt` for analysis.
-- **Cross-Platform**: Targets Linux (Pure-FTPd) and Windows (Microsoft FTP Service) servers.
+* Anonymous Login Testing: Validates anonymous:root access on FTP servers.
+
+* Root/Administrator Access Detection: Tests access to sensitive directories (/etc, /root, /Windows/System32).
+
+* Privilege Escalation Checks: Identifies vulnerable FTP versions (e.g., Microsoft FTP Service 5.0) and tests executable uploads (.asp, .sh).
+
+* FTP Bounce Attack Testing: Probes PORT command vulnerabilities for indirect attacks.
+
+* Recursive Directory Spidering: Crawls directories (depth ≤ 3), flagging sensitive files/directories (e.g., passwd, /Windows).
+
+* Vulnerability Scoring: Scores targets (anonymous login: +1, sensitive items: +2, root access: +5, escalation: +4, FTP Bounce: +3; high-value ≥ 5).
+
+* Logging: Saves results to darkftp_report.txt for analysis.
+
+* Cross-Platform: Targets Linux (Pure-FTPd) and Windows (Microsoft FTP Service) servers.
+
 
 
 ## Installation
