@@ -1,6 +1,3 @@
-Below is the `README.md` for the `DarkFTP` tool in Markdown format, ready for you to copy and paste into your GitHub repository's `README.md` file. It adheres to your requirements: no logo, no references to `ffk8ixrwh.json` or example IP lists, no "Replace yourusername" instruction, no Contributing section, and no MIT License. The short description is kept at ~298 characters, and it’s tailored for penetration testers and ethical hackers, incorporating the Dealsbe context for developers. The README includes description, features, installation, usage, configuration, ethical use disclaimer, and contact information, formatted for GitHub rendering.
-
-
 # DarkFTP: FTP Vulnerability Scanner for Ethical Hacking
 
 **DarkFTP** is a Python-based tool for penetration testers and ethical hackers to rapidly identify vulnerable FTP servers. It automates scanning for anonymous login, root/Administrator access, privilege escalation, FTP Bounce attacks, and recursive directory traversal, scoring high-value targets to prioritize fixes. Built for bulk IP analysis, DarkFTP empowers the ethical hacking community to secure systems before attackers exploit them.
