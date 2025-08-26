@@ -1,87 +1,105 @@
-# DarkFTP: FTP Vulnerability Scanner for Ethical Hacking
+# DarkFTP: FTP Vulnerability Scanner
 
-**DarkFTP** is a Python-based tool for penetration testers and ethical hackers to rapidly identify vulnerable FTP servers. It automates scanning for anonymous login, root/Administrator access, privilege escalation, FTP Bounce attacks, and recursive directory traversal, scoring high-value targets to prioritize fixes. Built for bulk IP analysis, DarkFTP empowers the ethical hacking community to secure systems before attackers exploit them.
+[![Python Version](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Warning**: DarkFTP is for **authorized penetration testing only**. Unauthorized use is illegal and unethical. Ensure explicit permission from system owners before scanning.
+DarkFTP is a Python-based tool designed for ethical hacking and penetration testing. It scans FTP servers that allow anonymous login (e.g., bulk results downloaded from Shodan.io for FTP anonymous login OK targets) to identify vulnerabilities, detect sensitive files/directories, test for root access, privilege escalation, and FTP bounce attacks. The tool assigns a vulnerability score to each target and highlights high-value ones for further investigation.
+
+**Note:** This tool is intended for educational and ethical purposes only. Use it responsibly and with permission on systems you own or have explicit authorization to test. Misuse may violate laws and ethical guidelines.
 
 ## Features
 
-* Anonymous Login Testing: Validates anonymous:root access on FTP servers.
-
-* Root/Administrator Access Detection: Tests access to sensitive directories (/etc, /root, /Windows/System32).
-
-* Privilege Escalation Checks: Identifies vulnerable FTP versions (e.g., Microsoft FTP Service 5.0) and tests executable uploads (.asp, .sh).
-
-* FTP Bounce Attack Testing: Probes PORT command vulnerabilities for indirect attacks.
-
-* Recursive Directory Spidering: Crawls directories (depth ≤ 3), flagging sensitive files/directories (e.g., passwd, /Windows).
-
-* Vulnerability Scoring: Scores targets (anonymous login: +1, sensitive items: +2, root access: +5, escalation: +4, FTP Bounce: +3; high-value ≥ 5).
-
-* Logging: Saves results to darkftp_report.txt for analysis.
-
-* Cross-Platform: Targets Linux (Pure-FTPd) and Windows (Microsoft FTP Service) servers.
-
-
+- **Anonymous Login Check**: Verifies if anonymous login is successful.
+- **OS Detection**: Infers the operating system (Linux/Windows/Unknown) based on the FTP banner.
+- **Root/Administrator Access Testing**: Attempts to access and write to privileged directories like `/etc`, `/root`, or `/Windows/System32`.
+- **Privilege Escalation Testing**: Checks for writable directories (e.g., `/tmp` or `/inetpub/wwwroot`) and known vulnerable FTP versions.
+- **FTP Bounce Vulnerability Detection**: Tests for PORT command exploitation potential.
+- **Directory Spidering**: Recursively crawls directories (up to a configurable depth) to find sensitive files (e.g., `passwd`, `shadow`, `.pem`) and directories (e.g., `/etc`, `/root`, `config`).
+- **Vulnerability Scoring**: Calculates a score based on findings; targets with score >= 5 are flagged as high-value.
+- **Logging and Reporting**: Outputs colored console logs and appends results to `darkftp_report.txt`.
+- **High-Value Target Summary**: Lists top-scoring targets at the end of the scan.
 
 ## Installation
 
-### Prerequisites
-- Python 3.6+
-- Library: `colorama`
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/darkftp.git
+   cd darkftp
+   ```
 
-Install dependencies:
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-pip install colorama
-
-
-### Download
-Download `darkftp.py` from the [GitHub repository](https://github.com/ChillHackLab/DarkFTP/) or directly from the release page for free.
+   **requirements.txt** (create this file if needed):
+   ```
+   argparse
+   ftplib
+   colorama
+   ```
 
 ## Usage
 
-1. **Prepare IP List**:
-   - Create a file (e.g., `ips.txt`) with one IP address per line.
+Run the script with a file containing a list of IP addresses (one per line). These can be exported from Shodan.io searches for FTP servers with anonymous login enabled (e.g., "ftp anonymous OK").
 
-2. **Run DarkFTP**:
-   ```bash
+```
+python darkftp.py --file ips.txt
+```
+
+- `--file`: Path to the file with IP addresses (required).
+
+### Example
+
+1. Prepare `ips.txt`:
+   ```
+   192.168.1.100
+   10.0.0.5
+   ```
+
+2. Run the tool:
+   ```
    python darkftp.py --file ips.txt
    ```
 
-3. **Output**:
-   - Terminal: Shows connection status (green), directories (yellow), vulnerabilities (red), and scores (magenta).
-   - Log: Saves to `darkftp_report.txt`.
-   - Summarizes high-value targets (score ≥ 5).
+3. Output will include per-IP scans with colored indicators (green for success, red for alerts, yellow for info). High-value targets are summarized at the end.
 
+## How It Works
+
+1. **Input**: Reads IPs from the provided file.
+2. **Scanning**:
+   - Connects via anonymous login.
+   - Detects OS from FTP banner.
+   - Lists initial directory and checks for sensitive items.
+   - Tests root access by attempting CWD, LIST, and STOR in privileged dirs.
+   - Checks privilege escalation via writable exec dirs and vulnerable versions.
+   - Tests FTP bounce with PORT command.
+   - Spiders directories recursively to depth 3, alerting on sensitive finds.
+3. **Scoring**: Accumulates points (e.g., +5 for root access, +4 for escalation, +3 for bounce, +2 per sensitive item).
+4. **Output**: Console logs, file report, and high-value summary.
 
 ## Configuration
 
-- **Sensitive Directories/Files**:
-  - Edit `SENSITIVE_DIRS` and `SENSITIVE_FILES` in `darkftp.py`:
-    ```python
-    SENSITIVE_DIRS = ['/etc', '/root', '/Windows', '/Windows/System32', ...]
-    SENSITIVE_FILES = ['passwd', 'shadow', 'config', 'credentials', ...]
-    ```
-- **Root Test Directories**:
-  - Modify `ROOT_TEST_DIRS`:
-    ```python
-    ROOT_TEST_DIRS = ['/etc', '/root', '/Windows/System32', '/Windows']
-    ```
-- **Vulnerable Versions**:
-  - Update `VULNERABLE_VERSIONS`:
-    ```python
-    VULNERABLE_VERSIONS = {
-        'Microsoft FTP Service 5.0': ['CVE-2009-3023', 'Potential remote code execution'],
-        ...
-    }
-    ```
+- **Sensitive Dirs/Files**: Customize `SENSITIVE_DIRS` and `SENSITIVE_FILES` in the script.
+- **Vulnerable Versions**: Update `VULNERABLE_VERSIONS` dictionary as needed.
+- **Max Spider Depth**: Adjust `max_depth` in `spider_directories` (default: 3).
+- **Test Dirs**: Modify `LINUX_ROOT_TEST_DIRS`, `WINDOWS_ROOT_TEST_DIRS`, etc., for OS-specific testing.
 
-## Ethical Use and Legal Disclaimer
+## Requirements
 
-**DarkFTP is for authorized penetration testing only.** Unauthorized scanning or exploitation violates laws like the Computer Fraud and Abuse Act (CFAA). Obtain explicit permission from system owners before use. Developers are not responsible for misuse.
+- Python 3.6+
+- Libraries: `ftplib` (standard), `colorama`, `argparse` (standard)
+- No external packages beyond those in requirements.txt
+- Tested on Linux/Windows; cross-platform compatible via colorama.
 
-## Contact
+## Disclaimer
 
-For issues, feature requests, or support:
-- Website: https://chillhack.net
-- Email: info@chillhack.net
+This tool is for ethical penetration testing only. The author is not responsible for any misuse or damage caused. Always obtain permission before scanning any systems. Scanning without authorization may be illegal in your jurisdiction.
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
