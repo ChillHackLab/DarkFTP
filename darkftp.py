@@ -5,6 +5,7 @@ from colorama import Fore, Style
 import sys
 import io
 import time
+import os  # For path normalization
 
 # Initialize colorama for cross-platform colored output
 colorama.init()
@@ -20,15 +21,13 @@ SENSITIVE_FILES = [
     'key', '.key', '.pem', '.conf', '.bak'
 ]
 
-# Define directories to test for root access
-ROOT_TEST_DIRS = [
-    '/etc', '/root', '/Windows/System32', '/Windows'
-]
+# Define directories to test for root access - separated by OS
+LINUX_ROOT_TEST_DIRS = ['/etc', '/root']
+WINDOWS_ROOT_TEST_DIRS = ['/Windows/System32', '/Windows']
 
-# Define directories for executable file upload (privilege escalation)
-EXEC_TEST_DIRS = [
-    '/tmp', '/inetpub/wwwroot'
-]
+# Define directories for executable file upload (privilege escalation) - separated by OS
+LINUX_EXEC_TEST_DIRS = ['/tmp']
+WINDOWS_EXEC_TEST_DIRS = ['/inetpub/wwwroot']
 
 # Known vulnerable FTP versions
 VULNERABLE_VERSIONS = {
@@ -37,30 +36,52 @@ VULNERABLE_VERSIONS = {
     'ProFTPD 1.3.5e': ['CVE-2011-4130', 'Directory traversal']
 }
 
+def detect_os(version):
+    """Detect OS based on FTP version banner."""
+    if 'Microsoft' in version or 'Windows' in version:
+        return 'windows'
+    elif 'Pure-FTPd' in version or 'ProFTPD' in version or 'vsftpd' in version:
+        return 'linux'
+    return 'unknown'
+
 def test_ftp_bounce(ftp, ip):
     """Test for FTP Bounce attack vulnerability."""
     bounce_vulnerable = False
     print(f"{Fore.CYAN}[*] Testing FTP Bounce for {ip}...{Style.RESET_ALL}")
     try:
+        # Test if PORT command is accepted
         ftp.sendcmd('PORT 127,0,0,1,0,80')
         print(f"{Fore.RED}[!] FTP Bounce POSSIBLE: PORT command accepted{Style.RESET_ALL}")
         bounce_vulnerable = True
+        # Attempt dummy bounce to a known open port (e.g., 80)
         test_file = 'bounce_test.txt'
         test_content = io.BytesIO(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         ftp.storbinary(f'STOR {test_file}', test_content)
         try:
             ftp.sendcmd('RETR bounce_test.txt')
-            print(f"{Fore.RED}[!] FTP Bounce CONFIRMED: Can send arbitrary requests{Style.RESET_ALL}")
-        except:
-            print(f"{Fore.YELLOW}[-] RETR failed for FTP Bounce test{Style.RESET_ALL}")
+            print(f"{Fore.RED}[!] FTP Bounce CONFIRMED: Can send arbitrary requests (server-side enabled){Style.RESET_ALL}")
+        except ftplib.error_perm as e:
+            if '553' in str(e) or 'Permission denied' in str(e):
+                print(f"{Fore.YELLOW}[-] RETR failed for FTP Bounce test: Permission denied (likely server-side restriction){Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}[-] RETR failed for FTP Bounce test: {e} (possibly firewall blocked){Style.RESET_ALL}")
+        except TimeoutError:
+            print(f"{Fore.YELLOW}[-] Timeout during RETR for FTP Bounce test (possibly firewall blocked){Style.RESET_ALL}")
+        except Exception as e:
+            print(f"{Fore.YELLOW}[-] Error during RETR for FTP Bounce test: {e} (possibly firewall or network issue){Style.RESET_ALL}")
         ftp.delete(test_file)
-    except ftplib.error_perm:
-        print(f"{Fore.YELLOW}[-] PORT command not supported or permission denied{Style.RESET_ALL}")
+    except ftplib.error_perm as e:
+        if '500' in str(e) or 'Command not understood' in str(e):
+            print(f"{Fore.YELLOW}[-] PORT command not supported (server-side disabled){Style.RESET_ALL}")
+        else:
+            print(f"{Fore.YELLOW}[-] PORT command failed: {e} (possibly permission denied or firewall blocked){Style.RESET_ALL}")
+    except TimeoutError:
+        print(f"{Fore.YELLOW}[-] Timeout during FTP Bounce test (possibly firewall blocked){Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.YELLOW}[-] Error testing FTP Bounce: {e}{Style.RESET_ALL}")
     return bounce_vulnerable
 
-def test_privilege_escalation(ftp, ip):
+def test_privilege_escalation(ftp, ip, os_type):
     """Test for potential privilege escalation vulnerabilities."""
     escalation_possible = False
     print(f"{Fore.CYAN}[*] Testing privilege escalation for {ip}...{Style.RESET_ALL}")
@@ -71,13 +92,25 @@ def test_privilege_escalation(ftp, ip):
             if vuln_version.lower() in version.lower():
                 escalation_possible = True
                 print(f"{Fore.RED}[!] VULNERABLE VERSION DETECTED: {vuln_version} - {vuln_info}{Style.RESET_ALL}")
+    except ftplib.error_perm as e:
+        print(f"{Fore.YELLOW}[-] Could not retrieve version (permission error): {e}{Style.RESET_ALL}")
+    except TimeoutError:
+        print(f"{Fore.YELLOW}[-] Timeout retrieving version{Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.YELLOW}[-] Could not retrieve version: {e}{Style.RESET_ALL}")
 
-    for test_dir in EXEC_TEST_DIRS:
+    exec_test_dirs = LINUX_EXEC_TEST_DIRS if os_type == 'linux' else WINDOWS_EXEC_TEST_DIRS if os_type == 'windows' else EXEC_TEST_DIRS
+    for test_dir in exec_test_dirs:
         try:
+            # Separate CWD and LIST
             ftp.cwd(test_dir)
             print(f"{Fore.GREEN}[+] Successfully changed to {test_dir}{Style.RESET_ALL}")
+            dir_list = []
+            ftp.dir(dir_list.append)
+            if dir_list:
+                print(f"{Fore.RED}[!] Can list {test_dir}:{Style.RESET_ALL}")
+                for line in dir_list:
+                    print(f"{Fore.RED}    {line}{Style.RESET_ALL}")
             test_file = 'test_exec' + ('.asp' if 'inetpub' in test_dir else '.sh')
             test_content = io.BytesIO(b"<% Response.Write('Test') %>" if 'inetpub' in test_dir else b"#!/bin/bash\necho Test")
             try:
@@ -87,55 +120,88 @@ def test_privilege_escalation(ftp, ip):
                 try:
                     ftp.delete(f'{test_dir}/{test_file}')
                     print(f"{Fore.GREEN}[-] Cleaned up: Deleted {test_file} from {test_dir}{Style.RESET_ALL}")
-                except:
-                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir}{Style.RESET_ALL}")
-            except ftplib.error_perm:
-                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: Permission denied{Style.RESET_ALL}")
-        except ftplib.error_perm:
-            print(f"{Fore.YELLOW}[-] Cannot access {test_dir}: Permission denied{Style.RESET_ALL}")
+                except ftplib.error_perm as e:
+                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir} (permission error): {e}{Style.RESET_ALL}")
+                except Exception as e:
+                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir}: {e}{Style.RESET_ALL}")
+            except ftplib.error_perm as e:
+                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: Permission denied ({e}){Style.RESET_ALL}")
+            except TimeoutError:
+                print(f"{Fore.YELLOW}[-] Timeout during write test for {test_dir}{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: {e}{Style.RESET_ALL}")
+        except ftplib.error_perm as e:
+            if '550' in str(e) or 'No such file or directory' in str(e):
+                print(f"{Fore.YELLOW}[-] {test_dir} does not exist{Style.RESET_ALL}")
+            elif '553' in str(e) or 'Permission denied' in str(e):
+                print(f"{Fore.YELLOW}[-] {test_dir} exists but permission denied ({e}){Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}[-] Cannot access {test_dir}: {e}{Style.RESET_ALL}")
+        except TimeoutError:
+            print(f"{Fore.YELLOW}[-] Timeout accessing {test_dir}{Style.RESET_ALL}")
         except Exception as e:
             print(f"{Fore.YELLOW}[-] Error testing {test_dir}: {e}{Style.RESET_ALL}")
     return escalation_possible
 
-def spider_directories(ftp, ip, current_dir='/', depth=0, max_depth=3):
+def spider_directories(ftp, ip, current_dir='/', depth=0, max_depth=3, visited=set()):
     """Recursively spider all directories and files."""
     sensitive_items = []
     if depth > max_depth:
         print(f"{Fore.YELLOW}[-] Max depth ({max_depth}) reached at {current_dir}{Style.RESET_ALL}")
         return sensitive_items
     try:
-        print(f"{Fore.YELLOW}[*] Spidering {current_dir} (depth {depth})...{Style.RESET_ALL}")
-        ftp.cwd(current_dir)
+        normalized_dir = os.path.normpath(current_dir)
+        if normalized_dir in visited:
+            print(f"{Fore.YELLOW}[-] Skipping already visited: {normalized_dir}{Style.RESET_ALL}")
+            return sensitive_items
+        visited.add(normalized_dir)
+        print(f"{Fore.YELLOW}[*] Spidering {normalized_dir} (depth {depth})...{Style.RESET_ALL}")
+        ftp.cwd(normalized_dir)
         items = []
         ftp.retrlines('NLST', items.append)
         for item in items:
+            item_path = os.path.normpath(os.path.join(normalized_dir, item))
             try:
-                ftp.cwd(f"{current_dir.rstrip('/')}/{item}")
-                print(f"{Fore.YELLOW}Dir: {current_dir.rstrip('/')}/{item}{Style.RESET_ALL}")
+                ftp.cwd(item_path)
+                print(f"{Fore.YELLOW}Dir: {item_path}{Style.RESET_ALL}")
                 for sensitive_dir in SENSITIVE_DIRS:
                     if sensitive_dir.lower() in item.lower():
-                        sensitive_items.append(f"Dir: {current_dir.rstrip('/')}/{item}")
+                        sensitive_items.append(f"Dir: {item_path}")
                         print(f"{Fore.RED}[!] ALERT: Sensitive directory found: {item}{Style.RESET_ALL}")
-                sensitive_items.extend(spider_directories(ftp, ip, f"{current_dir.rstrip('/')}/{item}", depth + 1, max_depth))
-                ftp.cwd(current_dir)
-            except ftplib.error_perm:
-                print(f"{Fore.YELLOW}File: {current_dir.rstrip('/')}/{item}{Style.RESET_ALL}")
-                for sensitive_file in SENSITIVE_FILES:
-                    if sensitive_file.lower() in item.lower():
-                        sensitive_items.append(f"File: {current_dir.rstrip('/')}/{item}")
-                        print(f"{Fore.RED}[!] ALERT: Sensitive file found: {item}{Style.RESET_ALL}")
-    except ftplib.error_perm:
-        print(f"{Fore.YELLOW}[-] Cannot access {current_dir}: Permission denied{Style.RESET_ALL}")
+                sensitive_items.extend(spider_directories(ftp, ip, item_path, depth + 1, max_depth, visited))
+                ftp.cwd(normalized_dir)
+            except ftplib.error_perm as e:
+                if '550' in str(e) or 'Not a directory' in str(e) or 'No such file or directory' in str(e):
+                    print(f"{Fore.YELLOW}File: {item_path}{Style.RESET_ALL}")
+                    for sensitive_file in SENSITIVE_FILES:
+                        if sensitive_file.lower() in item.lower():
+                            sensitive_items.append(f"File: {item_path}")
+                            print(f"{Fore.RED}[!] ALERT: Sensitive file found: {item}{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.YELLOW}[-] Cannot access {item_path}: {e}{Style.RESET_ALL}")
+            except TimeoutError:
+                print(f"{Fore.YELLOW}[-] Timeout accessing {item_path}{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.YELLOW}[-] Error accessing {item_path}: {e}{Style.RESET_ALL}")
+    except ftplib.error_perm as e:
+        if '550' in str(e) or 'No such file or directory' in str(e):
+            print(f"{Fore.YELLOW}[-] {normalized_dir} does not exist{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.YELLOW}[-] Cannot access {normalized_dir}: Permission denied ({e}){Style.RESET_ALL}")
+    except TimeoutError:
+        print(f"{Fore.YELLOW}[-] Timeout accessing {normalized_dir}{Style.RESET_ALL}")
     except Exception as e:
-        print(f"{Fore.YELLOW}[-] Error spidering {current_dir}: {e}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}[-] Error spidering {normalized_dir}: {e}{Style.RESET_ALL}")
     return sensitive_items
 
-def test_root_access(ftp, ip):
+def test_root_access(ftp, ip, os_type):
     """Test for root/Administrator access."""
     root_access = False
     print(f"{Fore.CYAN}[*] Testing root access for {ip}...{Style.RESET_ALL}")
-    for test_dir in ROOT_TEST_DIRS:
+    root_test_dirs = LINUX_ROOT_TEST_DIRS if os_type == 'linux' else WINDOWS_ROOT_TEST_DIRS if os_type == 'windows' else ROOT_TEST_DIRS
+    for test_dir in root_test_dirs:
         try:
+            # Separate CWD and LIST
             ftp.cwd(test_dir)
             print(f"{Fore.GREEN}[+] Successfully changed to {test_dir}{Style.RESET_ALL}")
             dir_list = []
@@ -154,12 +220,25 @@ def test_root_access(ftp, ip):
                 try:
                     ftp.delete(f'{test_dir}/{test_file}')
                     print(f"{Fore.GREEN}[-] Cleaned up: Deleted {test_file} from {test_dir}{Style.RESET_ALL}")
-                except:
-                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir}{Style.RESET_ALL}")
-            except ftplib.error_perm:
-                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: Permission denied{Style.RESET_ALL}")
-        except ftplib.error_perm:
-            print(f"{Fore.YELLOW}[-] Cannot access {test_dir}: Permission denied{Style.RESET_ALL}")
+                except ftplib.error_perm as e:
+                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir} (permission error): {e}{Style.RESET_ALL}")
+                except Exception as e:
+                    print(f"{Fore.YELLOW}[-] Warning: Could not delete {test_file} from {test_dir}: {e}{Style.RESET_ALL}")
+            except ftplib.error_perm as e:
+                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: Permission denied ({e}){Style.RESET_ALL}")
+            except TimeoutError:
+                print(f"{Fore.YELLOW}[-] Timeout during write test for {test_dir}{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.YELLOW}[-] Write test failed for {test_dir}: {e}{Style.RESET_ALL}")
+        except ftplib.error_perm as e:
+            if '550' in str(e) or 'No such file or directory' in str(e):
+                print(f"{Fore.YELLOW}[-] {test_dir} does not exist{Style.RESET_ALL}")
+            elif '553' in str(e) or 'Permission denied' in str(e):
+                print(f"{Fore.YELLOW}[-] {test_dir} exists but permission denied ({e}){Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}[-] Cannot access {test_dir}: {e}{Style.RESET_ALL}")
+        except TimeoutError:
+            print(f"{Fore.YELLOW}[-] Timeout accessing {test_dir}{Style.RESET_ALL}")
         except Exception as e:
             print(f"{Fore.YELLOW}[-] Error testing {test_dir}: {e}{Style.RESET_ALL}")
     return root_access
@@ -176,6 +255,11 @@ def check_ftp(ip):
         ftp.login(user='anonymous', passwd='root')
         score += 1  # Anonymous login successful
         log.append(f"{Fore.GREEN}[+] Connected to {ip} - Anonymous login successful{Style.RESET_ALL}")
+
+        # Get version for OS detection
+        version = ftp.getwelcome()  # Use getwelcome for banner
+        os_type = detect_os(version)
+        log.append(f"{Fore.YELLOW}[-] Detected OS type: {os_type}{Style.RESET_ALL}")
 
         # Initial directory listing
         dir_list = []
@@ -198,12 +282,12 @@ def check_ftp(ip):
             log.append(f"{Fore.GREEN}[-] No sensitive directories or files detected in initial listing{Style.RESET_ALL}")
 
         # Test root access
-        if test_root_access(ftp, ip):
+        if test_root_access(ftp, ip, os_type):
             score += 5
             log.append(f"{Fore.RED}[!] High-value target: Root/Administrator access confirmed{Style.RESET_ALL}")
 
         # Test privilege escalation
-        if test_privilege_escalation(ftp, ip):
+        if test_privilege_escalation(ftp, ip, os_type):
             score += 4
             log.append(f"{Fore.RED}[!] High-value target: Privilege escalation possible{Style.RESET_ALL}")
 
